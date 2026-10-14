@@ -1,7 +1,7 @@
 {
   "name": "intercon-tally",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "server/index.js",
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^15.0.2",
     "@expo/metro-runtime": "~57.0.17",
@@ -28,6 +28,9 @@
     "web": "expo start --web"
   },
   "private": true,
+  "engines": {
+    "node": ">=20.0.0 <21.0.0"
+  },
   "devDependencies": {
     "@types/react": "~19.2.4",
     "typescript": "~6.0.3"

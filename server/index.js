@@ -197,30 +197,25 @@ app.get(['/health', '/api/health', '/healthz'], (req, res) => {
 });
 
 // Serve static files from the compiled web bundle directory ('../dist' or './dist')
-if (fs.existsSync(DIST_DIR)) {
-  console.log(`[StaticServer] Serving static client export from: ${DIST_DIR}`);
-  app.use(
-    express.static(DIST_DIR, {
-      maxAge: '1d',
-      setHeaders: (res, filePath) => {
-        if (filePath.includes('/_expo/') || filePath.includes('/assets/')) {
-          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-        }
-      },
-    })
-  );
+const distDir = fs.existsSync(path.join(__dirname, '../dist'))
+  ? path.join(__dirname, '../dist')
+  : path.join(__dirname, './dist');
+
+if (fs.existsSync(distDir)) {
+  console.log(`[StaticServer] Serving static client export from: ${distDir}`);
+  app.use(express.static(distDir));
 
   // Catch-all route to serve index.html for Single-Page Routing (SPA)
-  app.use((req, res) => {
-    const indexPath = path.join(DIST_DIR, 'index.html');
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/health') || req.path.startsWith('/ws')) return next();
+    const indexPath = path.join(distDir, 'index.html');
     if (fs.existsSync(indexPath)) {
-      res.sendFile(indexPath);
-    } else {
-      res.status(404).send('404 Not Found');
+      return res.sendFile(indexPath);
     }
+    next();
   });
 } else {
-  console.warn(`[StaticServer] Warning: Web client directory not found at "${DIST_DIR}". Run npm run build.`);
+  console.warn(`[StaticServer] Warning: Web client directory not found at "${distDir}". Run npm run build.`);
   app.get('/', (req, res) => {
     res.status(200).send(`
       <!DOCTYPE html>
