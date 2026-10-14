@@ -14,33 +14,16 @@
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const express = require('express');
 const { WebSocketServer, WebSocket } = require('ws');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = '0.0.0.0';
-const DIST_DIR = path.resolve(__dirname, '../dist');
 
-// MIME types for static Expo web assets
-const MIME_TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.mjs': 'application/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.wav': 'audio/wav',
-  '.mp3': 'audio/mpeg',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.map': 'application/json',
-  '.wasm': 'application/wasm',
-};
+// Support both ../dist (when run from server dir) and ./dist (when run from root)
+const DIST_DIR = fs.existsSync(path.resolve(__dirname, '../dist'))
+  ? path.resolve(__dirname, '../dist')
+  : path.resolve(__dirname, './dist');
 
 /**
  * In-memory room storage:
@@ -169,122 +152,77 @@ function sendToUser(roomId, targetUserId, message) {
   return false;
 }
 
-// 1. Create HTTP Server with Static Web Serving and Concurrency Metrics on /health
-const server = http.createServer((req, res) => {
+// 1. Initialize Express App and HTTP Server with Static Web Serving and /health
+const app = express();
+const server = http.createServer(app);
+
+// CORS headers
+app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
-    return;
+    return res.sendStatus(204);
+  }
+  next();
+});
+
+// Health check endpoint for Render, Railway, Kubernetes, or monitoring
+app.get(['/health', '/api/health', '/healthz'], (req, res) => {
+  let totalConnectedClients = 0;
+  for (const r of rooms.values()) {
+    totalConnectedClients += r.participants.size;
   }
 
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const mem = process.memoryUsage();
 
-  // Health check endpoint for Render, Railway, Kubernetes, or monitoring
-  if (url.pathname === '/health' || url.pathname === '/api/health' || url.pathname === '/healthz') {
-    let totalConnectedClients = 0;
-    for (const r of rooms.values()) {
-      totalConnectedClients += r.participants.size;
+  res.status(200).json({
+    status: 'online',
+    service: 'Intercom Tally Signaling & Web Server',
+    version: '1.2.0',
+    uptimeSeconds: Math.floor(process.uptime()),
+    totalActiveRooms: rooms.size,
+    totalConnectedClients: totalConnectedClients,
+    totalWebSocketConnections: wss.clients.size,
+    memoryUsage: {
+      rssMB: Math.round((mem.rss / 1024 / 1024) * 100) / 100,
+      heapTotalMB: Math.round((mem.heapTotal / 1024 / 1024) * 100) / 100,
+      heapUsedMB: Math.round((mem.heapUsed / 1024 / 1024) * 100) / 100,
+      externalMB: Math.round((mem.external / 1024 / 1024) * 100) / 100,
+      arrayBuffersMB: Math.round(((mem.arrayBuffers || 0) / 1024 / 1024) * 100) / 100,
+    },
+    activeRooms: Array.from(rooms.keys()),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Serve static files from the compiled web bundle directory ('../dist' or './dist')
+if (fs.existsSync(DIST_DIR)) {
+  console.log(`[StaticServer] Serving static client export from: ${DIST_DIR}`);
+  app.use(
+    express.static(DIST_DIR, {
+      maxAge: '1d',
+      setHeaders: (res, filePath) => {
+        if (filePath.includes('/_expo/') || filePath.includes('/assets/')) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      },
+    })
+  );
+
+  // Catch-all route to serve index.html for Single-Page Routing (SPA)
+  app.use((req, res) => {
+    const indexPath = path.join(DIST_DIR, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).send('404 Not Found');
     }
-
-    const mem = process.memoryUsage();
-
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(
-      JSON.stringify(
-        {
-          status: 'online',
-          service: 'Intercom Tally Signaling & Web Server',
-          version: '1.2.0',
-          uptimeSeconds: Math.floor(process.uptime()),
-          totalActiveRooms: rooms.size,
-          totalConnectedClients: totalConnectedClients,
-          totalWebSocketConnections: wss.clients.size,
-          memoryUsage: {
-            rssMB: Math.round((mem.rss / 1024 / 1024) * 100) / 100,
-            heapTotalMB: Math.round((mem.heapTotal / 1024 / 1024) * 100) / 100,
-            heapUsedMB: Math.round((mem.heapUsed / 1024 / 1024) * 100) / 100,
-            externalMB: Math.round((mem.external / 1024 / 1024) * 100) / 100,
-            arrayBuffersMB: Math.round(((mem.arrayBuffers || 0) / 1024 / 1024) * 100) / 100,
-          },
-          activeRooms: Array.from(rooms.keys()),
-          timestamp: new Date().toISOString(),
-        },
-        null,
-        2
-      )
-    );
-    return;
-  }
-
-  // Reject non-GET HTTP methods for static files
-  if (req.method !== 'GET') {
-    res.writeHead(405, { 'Content-Type': 'text/plain' });
-    res.end('Method Not Allowed');
-    return;
-  }
-
-  // Check if compiled web client assets exist in dist/
-  if (fs.existsSync(DIST_DIR)) {
-    const rawPath = decodeURIComponent(url.pathname);
-    const sanitizedPath = path.normalize(rawPath).replace(/^(\.\.[\/\\])+/, '');
-    const isRoot = sanitizedPath === '/' || sanitizedPath === '.' || sanitizedPath === '';
-    const targetFile = isRoot ? path.join(DIST_DIR, 'index.html') : path.join(DIST_DIR, sanitizedPath);
-
-    fs.stat(targetFile, (err, stats) => {
-      if (!err && stats.isFile()) {
-        const ext = path.extname(targetFile).toLowerCase();
-        const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-        const isHashedAsset = sanitizedPath.startsWith('/_expo/') || sanitizedPath.startsWith('/assets/');
-        const cacheControl = isHashedAsset
-          ? 'public, max-age=31536000, immutable'
-          : 'public, max-age=0, must-revalidate';
-
-        res.writeHead(200, {
-          'Content-Type': contentType,
-          'Content-Length': stats.size,
-          'Cache-Control': cacheControl,
-        });
-
-        const stream = fs.createReadStream(targetFile);
-        stream.pipe(res);
-        stream.on('error', () => {
-          if (!res.headersSent) {
-            res.writeHead(500, { 'Content-Type': 'text/plain' });
-            res.end('Internal Server Error');
-          }
-        });
-        return;
-      }
-
-      // SPA fallback for HTML5 routing: If requested path has no file extension, serve index.html
-      const hasFileExtension = path.extname(sanitizedPath) !== '';
-      const indexPath = path.join(DIST_DIR, 'index.html');
-
-      if (!hasFileExtension && fs.existsSync(indexPath)) {
-        res.writeHead(200, {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'public, max-age=0, must-revalidate',
-        });
-        const stream = fs.createReadStream(indexPath);
-        stream.pipe(res);
-        return;
-      }
-
-      // File not found
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('404 Not Found');
-    });
-    return;
-  }
-
-  // Fallback when web client is not yet compiled (e.g. running raw server in dev)
-  if (url.pathname === '/') {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(`
+  });
+} else {
+  console.warn(`[StaticServer] Warning: Web client directory not found at "${DIST_DIR}". Run npm run build.`);
+  app.get('/', (req, res) => {
+    res.status(200).send(`
       <!DOCTYPE html>
       <html>
         <head><title>Intercom Tally Server</title></head>
@@ -295,12 +233,8 @@ const server = http.createServer((req, res) => {
         </body>
       </html>
     `);
-    return;
-  }
-
-  res.writeHead(404, { 'Content-Type': 'text/plain' });
-  res.end('Not Found');
-});
+  });
+}
 
 // 2. Initialize WebSocket Server attached to HTTP server
 const wss = new WebSocketServer({ server });
