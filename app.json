@@ -7,7 +7,13 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio"
+        ],
+        "NSMicrophoneUsageDescription": "Intercom Tali requires microphone access to enable real-time voice communication during live production."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -15,8 +21,23 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "permissions": [
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "BLUETOOTH",
+        "WAKE_LOCK"
+      ]
     },
+    "plugins": [
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Intercom Tali requires microphone access to enable real-time voice communication during live production."
+        }
+      ],
+      "@config-plugins/react-native-webrtc"
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     }

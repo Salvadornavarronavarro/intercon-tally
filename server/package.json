@@ -1,0 +1,26 @@
+{
+  "name": "intercom-tally-signaling-server",
+  "version": "1.0.0",
+  "description": "Zero-cost, lightweight WebRTC and Tally signaling server for Intercom Tali",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "keywords": [
+    "webrtc",
+    "signaling",
+    "intercom",
+    "tally",
+    "broadcast",
+    "websocket"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

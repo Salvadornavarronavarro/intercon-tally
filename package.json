@@ -3,16 +3,42 @@
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {
-    "expo": "~57.0.27",
+    "@config-plugins/react-native-webrtc": "^15.0.2",
+    "@expo/metro-runtime": "~57.0.17",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~57.0.29",
+    "expo-av": "^16.0.8",
+    "expo-keep-awake": "~57.0.2",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
-    "react-native": "0.86.3"
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-web": "^0.21.2",
+    "react-native-webrtc": "^124.0.8",
+    "ws": "^8.18.0"
   },
   "scripts": {
-    "start": "expo start",
+    "start": "node server/index.js",
+    "build": "npx expo export --platform web && cd server && npm install",
+    "dev:expo": "expo start",
+    "dev:server": "cd server && npm start",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@types/react": "~19.2.4",
+    "typescript": "~6.0.3"
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "expo-av",
+          "react-native-webrtc"
+        ]
+      }
+    }
+  }
 }
