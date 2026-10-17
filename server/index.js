@@ -533,12 +533,22 @@ function handleClientMessage(ws, message) {
     }
 
     // ----------------------------------------------------
-    // WEBRTC AUDIO SIGNALING RELAY (AUDIO_OFFER / ANSWER / ICE)
+    // WEBRTC AUDIO SIGNALING RELAY (SDP OFFERS, ANSWERS, ICE CANDIDATES)
     // ----------------------------------------------------
     case 'AUDIO_OFFER':
+    case 'webrtc-offer':
+    case 'offer':
     case 'AUDIO_ANSWER':
-    case 'ICE_CANDIDATE': {
-      const toUserId = payload?.toUserId;
+    case 'webrtc-answer':
+    case 'answer':
+    case 'ICE_CANDIDATE':
+    case 'webrtc-ice-candidate':
+    case 'candidate': {
+      const toUserId =
+        payload?.toUserId ||
+        payload?.targetUserId ||
+        message.toUserId ||
+        message.targetUserId;
 
       if (toUserId) {
         // Direct peer-to-peer unicast relay strictly within THIS room

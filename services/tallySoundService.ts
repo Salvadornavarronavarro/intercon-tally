@@ -86,6 +86,13 @@ export class TallySoundService {
   }
 
   /**
+   * Initializes and unlocks the audio session on user gesture.
+   */
+  async unlockAudioSession(): Promise<boolean> {
+    return this.initAudioSession();
+  }
+
+  /**
    * Prepares and loads the Preview sound instance if not already loaded.
    */
   private async loadPreviewSound(): Promise<Audio.Sound | null> {
@@ -423,6 +430,7 @@ export const tallySoundService = new TallySoundService();
 
 // Clean, direct control exports as requested
 export const initAudioSession = (): Promise<boolean> => tallySoundService.initAudioSession();
+export const unlockAudioSession = (): Promise<boolean> => tallySoundService.unlockAudioSession();
 export const playPreviewTone = (): Promise<void> => tallySoundService.playPreviewTone();
 export const startProgramTone = (): Promise<void> => tallySoundService.startProgramTone();
 export const stopAllTones = (): Promise<void> => tallySoundService.stopAllTones();

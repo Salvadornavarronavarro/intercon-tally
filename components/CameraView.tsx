@@ -28,6 +28,7 @@ export const CameraView: React.FC = () => {
     currentUser,
     currentRoomId,
     currentTallyState,
+    isProgramOverlap,
     connectionStatus,
     isMuted,
     isMutedByDirector,
@@ -148,7 +149,9 @@ export const CameraView: React.FC = () => {
           ]}
         >
           <Text style={styles.tallyStateText}>
-            {isProgram
+            {isProgramOverlap
+              ? '● CUT OVERLAP (2S TONE)'
+              : isProgram
               ? '● ON AIR / LIVE'
               : isPreview
               ? '● PREVIEW / STANDBY'
@@ -172,17 +175,19 @@ export const CameraView: React.FC = () => {
 
         {/* Acoustic Audio Tally Indicator */}
         <View style={styles.cueRow}>
-          <Text style={[styles.cueIcon, isProgram && styles.textWhite]}>
-            {isProgram ? '🔊' : isPreview ? '🔔' : '🔇'}
+          <Text style={[styles.cueIcon, (isProgram || isProgramOverlap) && styles.textWhite]}>
+            {(isProgram || isProgramOverlap) ? '🔊' : isPreview ? '🔔' : '🔇'}
           </Text>
           <Text
             style={[
               styles.cueText,
-              isProgram && styles.textWhite,
+              (isProgram || isProgramOverlap) && styles.textWhite,
               isPreview && styles.textGreen,
             ]}
           >
-            {isProgram
+            {isProgramOverlap
+              ? 'PROGRAM CUT OVERLAP (2S TONE ACTIVE)'
+              : isProgram
               ? 'PROGRAM AUDIO TONE ACTIVE'
               : isPreview
               ? 'PREVIEW CHIME TRIGGERED'

@@ -64,6 +64,33 @@ export class WebTallySoundService {
   }
 
   /**
+   * Unlocks Web Audio API explicitly on direct user interaction (e.g. Enter Intercom button).
+   * Fully satisfies iPadOS / iOS / macOS Safari autoplay policies by playing a 1-sample silent buffer.
+   */
+  async unlockAudioSession(): Promise<boolean> {
+    try {
+      const ctx = this.getAudioContext();
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch((err) => {
+          console.warn('[WebTallySoundService] AudioContext resume failed:', err);
+        });
+      }
+      try {
+        const buffer = ctx.createBuffer(1, 1, 22050);
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+        source.start(0);
+      } catch {}
+      this.isAudioSessionReady = ctx.state === 'running';
+      return this.isAudioSessionReady;
+    } catch (error) {
+      console.warn('[WebTallySoundService] Error unlocking audio session:', error);
+      return false;
+    }
+  }
+
+  /**
    * Plays the Preview Tone (PREVIEW).
    * Plays an acoustic sequence of exactly three subtle, distinct pulses ("pip - pip - pip"):
    * - 80ms tone, 120ms silence, repeated 3 times, then stops completely.
@@ -308,6 +335,7 @@ export class WebTallySoundService {
 export const tallySoundService = new WebTallySoundService();
 
 export const initAudioSession = (): Promise<boolean> => tallySoundService.initAudioSession();
+export const unlockAudioSession = (): Promise<boolean> => tallySoundService.unlockAudioSession();
 export const playPreviewTone = (): Promise<void> => tallySoundService.playPreviewTone();
 export const startProgramTone = (): Promise<void> => tallySoundService.startProgramTone();
 export const stopAllTones = (): Promise<void> => tallySoundService.stopAllTones();

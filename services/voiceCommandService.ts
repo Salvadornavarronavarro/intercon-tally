@@ -17,10 +17,12 @@ export interface VoiceCommandCallbacks {
 }
 
 /**
- * Normalizes Spanish spoken number words (uno, dos, tres...) to digits (1-8).
+ * Normalizes Spanish and English spoken number words (uno, dos, tres... / one, two, three...) to digits (1-8).
  */
-export function normalizeSpanishTranscript(text: string): string {
+export function normalizeTranscript(text: string): string {
   const numberWordMap: Record<string, string> = {
+    // Spanish
+    un: '1',
     uno: '1',
     una: '1',
     dos: '2',
@@ -30,33 +32,81 @@ export function normalizeSpanishTranscript(text: string): string {
     seis: '6',
     siete: '7',
     ocho: '8',
+    // English
+    one: '1',
+    two: '2',
+    three: '3',
+    four: '4',
+    five: '5',
+    six: '6',
+    seven: '7',
+    eight: '8',
   };
 
   return text.replace(
-    /\b(uno|una|dos|tres|cuatro|cinco|seis|siete|ocho)\b/gi,
+    /\b(uno|una|un|dos|tres|cuatro|cinco|seis|siete|ocho|one|two|three|four|five|six|seven|eight)\b/gi,
     (matched) => numberWordMap[matched.toLowerCase()] || matched
   );
 }
 
+// Backward-compatible alias
+export const normalizeSpanishTranscript = normalizeTranscript;
+
 /**
- * Parses spoken Spanish text for Director Tally commands:
+ * Parses spoken Spanish and English text for Director Tally commands:
  *
  * 1. Standby / Preview triggers:
- *    - Regex: /(preparad[oa]|previo)\s*(cámara|cam)?\s*([1-8])/i
+ *    - "preparada cámara [N]", "prepara cámara [N]", "previo [N]", "preview [N]", "standby [N]", "ready [N]"
  *    - Action: Set Preview camera
  *
  * 2. Program / Live / Cut triggers:
- *    - Regex: /(dentro|va|corte)\s*(cámara|cam)?\s*([1-8])/i
- *    - Regex: /(cámara|cam)\s*([1-8])\s*(dentro|va)/i
- *    - Action: Promote to Program (Cut)
+ *    - "dentro cámara [N]", "cámara [N] dentro", "va [N]", "corte [N]", "cut [N]", "take [N]", "live [N]"
+ *    - Direct cut commands: "cámara [N]", "cam [N]", "camera [N]"
+ *    - Action: Switch to Program (Cut)
  */
 export function parseVoiceCommand(rawText: string): ParsedVoiceCommand | null {
   if (!rawText || typeof rawText !== 'string') return null;
 
-  const normalized = normalizeSpanishTranscript(rawText.trim());
+  const normalized = normalizeTranscript(rawText.trim());
 
-  // Program Trigger 1: /(dentro|va|corte)\s*(c[áa]mara|cam)?\s*([1-8])/i
-  const programMatch1 = normalized.match(/(dentro|va|corte)\s*(c[áa]mara|cam)?\s*([1-8])/i);
+  // 1. Preview Triggers: checked first so "preparada cámara 2" won't match direct "cámara 2"
+  const previewMatch1 = normalized.match(
+    /(preparad[oa]|prepara|previo|preview|standby|ready)\s*(c[áa]mara|camera|cam)?\s*([1-8])/i
+  );
+  if (previewMatch1 && previewMatch1[3]) {
+    const num = parseInt(previewMatch1[3], 10);
+    if (num >= 1 && num <= 8) {
+      return {
+        type: 'PREVIEW',
+        cameraId: `cam${num}`,
+        cameraNumber: num,
+        triggerWord: previewMatch1[1].toLowerCase(),
+        rawPhrase: previewMatch1[0].trim(),
+      };
+    }
+  }
+
+  const previewMatch2 = normalized.match(
+    /(c[áa]mara|camera|cam)\s*([1-8])\s*(preparad[oa]|prepara|previo|preview|standby|ready)/i
+  );
+  if (previewMatch2 && previewMatch2[2]) {
+    const num = parseInt(previewMatch2[2], 10);
+    if (num >= 1 && num <= 8) {
+      return {
+        type: 'PREVIEW',
+        cameraId: `cam${num}`,
+        cameraNumber: num,
+        triggerWord: previewMatch2[3].toLowerCase(),
+        rawPhrase: previewMatch2[0].trim(),
+      };
+    }
+  }
+
+  // 2. Program Triggers (Explicit trigger word)
+  // Prefix: "dentro cámara 2", "va 3", "corte 1", "cut 4", "take 2", "live 1"
+  const programMatch1 = normalized.match(
+    /(dentro|va|corte|cut|take|live|program)\s*(c[áa]mara|camera|cam)?\s*([1-8])/i
+  );
   if (programMatch1 && programMatch1[3]) {
     const num = parseInt(programMatch1[3], 10);
     if (num >= 1 && num <= 8) {
@@ -70,8 +120,10 @@ export function parseVoiceCommand(rawText: string): ParsedVoiceCommand | null {
     }
   }
 
-  // Program Trigger 2: /(c[áa]mara|cam)\s*([1-8])\s*(dentro|va)/i
-  const programMatch2 = normalized.match(/(c[áa]mara|cam)\s*([1-8])\s*(dentro|va)/i);
+  // Suffix: "cámara 2 dentro", "cam 1 va", "camera 3 live", "cam 4 cut"
+  const programMatch2 = normalized.match(
+    /(c[áa]mara|camera|cam)\s*([1-8])\s*(dentro|va|corte|cut|take|live|program|on air)/i
+  );
   if (programMatch2 && programMatch2[2]) {
     const num = parseInt(programMatch2[2], 10);
     if (num >= 1 && num <= 8) {
@@ -85,17 +137,17 @@ export function parseVoiceCommand(rawText: string): ParsedVoiceCommand | null {
     }
   }
 
-  // Preview Trigger: /(preparad[oa]|previo)\s*(c[áa]mara|cam)?\s*([1-8])/i
-  const previewMatch = normalized.match(/(preparad[oa]|previo)\s*(c[áa]mara|cam)?\s*([1-8])/i);
-  if (previewMatch && previewMatch[3]) {
-    const num = parseInt(previewMatch[3], 10);
+  // 3. Direct Program Trigger: "cámara [N]", "cam [N]", "camera [N]" (e.g. "cámara 1", "cam 2")
+  const directMatch = normalized.match(/\b(c[áa]mara|camera|cam)\s*([1-8])\b/i);
+  if (directMatch && directMatch[2]) {
+    const num = parseInt(directMatch[2], 10);
     if (num >= 1 && num <= 8) {
       return {
-        type: 'PREVIEW',
+        type: 'PROGRAM',
         cameraId: `cam${num}`,
         cameraNumber: num,
-        triggerWord: previewMatch[1].toLowerCase(),
-        rawPhrase: previewMatch[0].trim(),
+        triggerWord: directMatch[1].toLowerCase(),
+        rawPhrase: directMatch[0].trim(),
       };
     }
   }
@@ -147,7 +199,7 @@ class WebSpeechEngine implements VoiceRecognitionEngine {
         this.recognition = new SpeechRecognition();
         this.recognition.continuous = true;
         this.recognition.interimResults = true;
-        this.recognition.lang = 'es-ES';
+        this.recognition.lang = (typeof navigator !== 'undefined' && navigator.language && navigator.language.startsWith('en')) ? navigator.language : 'es-ES';
         this.recognition.maxAlternatives = 1;
 
         this.recognition.onstart = () => {

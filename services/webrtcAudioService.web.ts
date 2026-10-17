@@ -40,11 +40,12 @@ export class WebRTCAudioService {
   private localStream: MediaStream | null = null;
   private peerConnections: Map<string, RTCPeerConnection> = new Map();
   private iceCandidateQueues: Map<string, any[]> = new Map();
+  private remoteAudioElements: Map<string, HTMLAudioElement> = new Map();
 
   private roomId: string | null = null;
   private localUserId: string | null = null;
   private isCallActive = false;
-  private isMicEnabled = false;
+  private isMicEnabled = true; // Default to UNMUTED (active talkback) upon entering room
 
   private unsubscribers: Array<() => void> = [];
   private onRemoteStreamCallbacks: Set<RemoteStreamCallback> = new Set();
@@ -99,30 +100,48 @@ export class WebRTCAudioService {
       this.closePeerConnection(payload.userId);
     });
 
-    const unsubOffer = signalingService.on<AudioOfferPayload>('AUDIO_OFFER', async (payload) => {
+    const handleOfferMsg = async (payload: AudioOfferPayload) => {
       if (payload.toUserId && payload.toUserId !== this.localUserId) return;
       if (payload.fromUserId === this.localUserId) return;
 
-      console.log('[WebRTCAudioService-Web] Received AUDIO_OFFER from:', payload.fromUserId);
+      console.log('[WebRTCAudioService-Web] Received SDP offer from:', payload.fromUserId);
       await this.handleOffer(payload.fromUserId, payload.sdp);
-    });
+    };
 
-    const unsubAnswer = signalingService.on<AudioAnswerPayload>('AUDIO_ANSWER', async (payload) => {
+    const handleAnswerMsg = async (payload: AudioAnswerPayload) => {
       if (payload.toUserId && payload.toUserId !== this.localUserId) return;
       if (payload.fromUserId === this.localUserId) return;
 
-      console.log('[WebRTCAudioService-Web] Received AUDIO_ANSWER from:', payload.fromUserId);
+      console.log('[WebRTCAudioService-Web] Received SDP answer from:', payload.fromUserId);
       await this.handleAnswer(payload.fromUserId, payload.sdp);
-    });
+    };
 
-    const unsubCandidate = signalingService.on<IceCandidatePayload>('ICE_CANDIDATE', async (payload) => {
+    const handleCandidateMsg = async (payload: IceCandidatePayload) => {
       if (payload.toUserId && payload.toUserId !== this.localUserId) return;
       if (payload.fromUserId === this.localUserId) return;
 
       await this.handleRemoteCandidate(payload.fromUserId, payload.candidate);
-    });
+    };
 
-    this.unsubscribers.push(unsubJoin, unsubLeave, unsubOffer, unsubAnswer, unsubCandidate);
+    const unsubOffer1 = signalingService.on<AudioOfferPayload>('AUDIO_OFFER', handleOfferMsg);
+    const unsubOffer2 = signalingService.on<AudioOfferPayload>('webrtc-offer' as any, handleOfferMsg);
+
+    const unsubAnswer1 = signalingService.on<AudioAnswerPayload>('AUDIO_ANSWER', handleAnswerMsg);
+    const unsubAnswer2 = signalingService.on<AudioAnswerPayload>('webrtc-answer' as any, handleAnswerMsg);
+
+    const unsubCandidate1 = signalingService.on<IceCandidatePayload>('ICE_CANDIDATE', handleCandidateMsg);
+    const unsubCandidate2 = signalingService.on<IceCandidatePayload>('webrtc-ice-candidate' as any, handleCandidateMsg);
+
+    this.unsubscribers.push(
+      unsubJoin,
+      unsubLeave,
+      unsubOffer1,
+      unsubOffer2,
+      unsubAnswer1,
+      unsubAnswer2,
+      unsubCandidate1,
+      unsubCandidate2
+    );
   }
 
   private unbindSignalingListeners(): void {
@@ -155,9 +174,13 @@ export class WebRTCAudioService {
 
     pc.ontrack = (event: RTCTrackEvent) => {
       console.log('[WebRTCAudioService-Web] Received remote audio track from:', remoteUserId);
-      if (event.streams && event.streams[0]) {
-        this.notifyRemoteStream(remoteUserId, event.streams[0]);
-      }
+      const stream =
+        event.streams && event.streams[0]
+          ? event.streams[0]
+          : new MediaStream([event.track]);
+
+      this.attachRemoteAudioStream(remoteUserId, stream);
+      this.notifyRemoteStream(remoteUserId, stream);
     };
 
     let disconnectTimer: any = null;
@@ -314,7 +337,68 @@ export class WebRTCAudioService {
     return this.isMicEnabled;
   }
 
+  private attachRemoteAudioStream(peerId: string, stream: MediaStream): void {
+    if (typeof document === 'undefined') return;
+
+    let audioEl = this.remoteAudioElements.get(peerId);
+    if (!audioEl) {
+      audioEl = document.createElement('audio');
+      audioEl.id = `remote-audio-${peerId}`;
+      audioEl.autoplay = true;
+      (audioEl as any).playsInline = true;
+      (audioEl as any).playsinline = true;
+      audioEl.setAttribute('playsinline', '');
+      audioEl.setAttribute('webkit-playsinline', '');
+      audioEl.setAttribute('autoplay', '');
+      audioEl.style.display = 'none';
+      document.body.appendChild(audioEl);
+      this.remoteAudioElements.set(peerId, audioEl);
+    }
+
+    audioEl.srcObject = stream;
+    audioEl.play().catch((err) => {
+      console.warn(`[WebRTCAudioService-Web] Remote audio play waiting for user unlock (${peerId}):`, err);
+    });
+  }
+
+  private removeRemoteAudioStream(peerId: string): void {
+    const audioEl = this.remoteAudioElements.get(peerId);
+    if (audioEl) {
+      try {
+        audioEl.pause();
+        audioEl.srcObject = null;
+        audioEl.remove();
+      } catch {}
+      this.remoteAudioElements.delete(peerId);
+    }
+  }
+
+  /**
+   * Directly unlocks HTML5 audio playback for all remote WebRTC audio elements.
+   * Call on direct user gesture ("ENTER PRODUCTION INTERCOM").
+   */
+  async unlockAudioPlayback(): Promise<void> {
+    if (typeof document === 'undefined') return;
+
+    for (const [, audioEl] of this.remoteAudioElements) {
+      try {
+        await audioEl.play();
+      } catch {}
+    }
+
+    // Play a silent 1-sample data URI audio element to grant global playback permission to WebKit/Safari
+    try {
+      const dummy = document.createElement('audio');
+      dummy.setAttribute('playsinline', '');
+      dummy.setAttribute('webkit-playsinline', '');
+      dummy.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+      await dummy.play();
+      dummy.remove();
+    } catch {}
+  }
+
   private closePeerConnection(peerId: string): void {
+    this.removeRemoteAudioStream(peerId);
     const pc = this.peerConnections.get(peerId);
     if (pc) {
       try {
@@ -328,6 +412,12 @@ export class WebRTCAudioService {
 
   async endAudioCall(): Promise<void> {
     this.unbindSignalingListeners();
+
+    // Remove all remote audio elements from DOM
+    this.remoteAudioElements.forEach((_, peerId) => {
+      this.removeRemoteAudioStream(peerId);
+    });
+    this.remoteAudioElements.clear();
 
     this.peerConnections.forEach((pc) => {
       try {

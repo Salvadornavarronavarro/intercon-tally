@@ -9,6 +9,9 @@ export type SignalingEventType =
   | 'AUDIO_OFFER'
   | 'AUDIO_ANSWER'
   | 'ICE_CANDIDATE'
+  | 'webrtc-offer'
+  | 'webrtc-answer'
+  | 'webrtc-ice-candidate'
   | 'PING'
   | 'PONG';
 

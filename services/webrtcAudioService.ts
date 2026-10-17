@@ -431,6 +431,10 @@ export class WebRTCAudioService {
     console.log('[WebRTCAudioService] Audio call ended and hardware released');
   }
 
+  async unlockAudioPlayback(): Promise<void> {
+    return Promise.resolve();
+  }
+
   onRemoteStream(callback: RemoteStreamCallback): () => void {
     this.onRemoteStreamCallbacks.add(callback);
     return () => {

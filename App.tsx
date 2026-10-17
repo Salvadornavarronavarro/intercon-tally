@@ -18,6 +18,8 @@ import {
   CameraId,
   Participant,
 } from './context/IntercomContext';
+import { unlockAudioSession } from './services/tallySoundService';
+import { webrtcAudioService } from './services/webrtcAudioService';
 import { DirectorView } from './components/DirectorView';
 import { CameraView } from './components/CameraView';
 
@@ -61,6 +63,14 @@ const MainScreen: React.FC = () => {
   const handleJoin = async () => {
     if (!name.trim() || !roomId.trim()) return;
 
+    // iPadOS / iOS & macOS WebKit Audio Unlocking directly on user touch/click
+    try {
+      await unlockAudioSession();
+      await webrtcAudioService.unlockAudioPlayback();
+    } catch (unlockErr) {
+      console.warn('[App] Audio unlock warning:', unlockErr);
+    }
+
     setIsJoining(true);
     try {
       const userProfile: Participant = {
@@ -68,7 +78,7 @@ const MainScreen: React.FC = () => {
         name: name.trim(),
         role,
         cameraId: role === 'camera' ? selectedCam : undefined,
-        isMuted: true, // Join muted by default to prevent audio feedback
+        isMuted: false, // Default to UNMUTED (active talkback) upon entering room
       };
 
       await joinRoom(roomId.trim().toUpperCase(), userProfile);

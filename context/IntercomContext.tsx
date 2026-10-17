@@ -44,6 +44,7 @@ export interface IntercomContextType {
   activeProgramCamera: string | null;
   participantsList: Participant[];
   currentTallyState: TallyState;
+  isProgramOverlap: boolean;
   connectionStatus: ConnectionStatus;
 
   // Convenience computed helpers
@@ -81,6 +82,7 @@ export const IntercomProvider: React.FC<IntercomProviderProps> = ({ children }) 
   const [participantsList, setParticipantsList] = useState<Participant[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
   const [isMutedByDirector, setIsMutedByDirector] = useState<boolean>(false);
+  const [isProgramOverlap, setIsProgramOverlap] = useState<boolean>(false);
 
   const currentUserRef = useRef<Participant | null>(currentUser);
   currentUserRef.current = currentUser;
@@ -91,48 +93,104 @@ export const IntercomProvider: React.FC<IntercomProviderProps> = ({ children }) 
   const activePreviewCameraRef = useRef<string | null>(activePreviewCamera);
   activePreviewCameraRef.current = activePreviewCamera;
 
-  // Calculate current device's tally status
+  const overlapTimerRef = useRef<any>(null);
+  const previousProgramCameraRef = useRef<string | null>(null);
+
+  // Calculate current device's tally status (active program camera or in 2-second cut overlap)
   const currentTallyState: TallyState = useMemo(() => {
     if (!currentUser || currentUser.role !== 'camera' || !currentUser.cameraId) {
       return 'idle';
     }
-    if (currentUser.cameraId === activeProgramCamera) {
+    if (currentUser.cameraId === activeProgramCamera || isProgramOverlap) {
       return 'program';
     }
     if (currentUser.cameraId === activePreviewCamera) {
       return 'preview';
     }
     return 'idle';
-  }, [currentUser, activeProgramCamera, activePreviewCamera]);
+  }, [currentUser, activeProgramCamera, activePreviewCamera, isProgramOverlap]);
 
-  // Acoustic Tally Feedback Synchronization
-  // Automatically triggers corresponding sound when the current camera's tally state changes
+  // Acoustic Tally Feedback Synchronization & 2-Second PROGRAM Overlap
   useEffect(() => {
-    // If not a camera, idle, or left room, ensure no tally tone is playing
+    // 1. Strict Director acoustic isolation: Director device NEVER plays tally tones
     if (!currentUser || currentUser.role !== 'camera' || !currentUser.cameraId) {
+      if (overlapTimerRef.current) {
+        clearTimeout(overlapTimerRef.current);
+        overlapTimerRef.current = null;
+      }
+      setIsProgramOverlap(false);
+      previousProgramCameraRef.current = null;
       stopAllTones();
       return;
     }
 
-    const cameraId = currentUser.cameraId;
+    const myCamId = currentUser.cameraId;
+    const prevProgramCam = previousProgramCameraRef.current;
+    previousProgramCameraRef.current = activeProgramCamera;
 
-    if (activeProgramCamera === cameraId) {
-      // Camera is ON AIR / PROGRAM: start continuous tone loop
-      console.log(`[IntercomContext] Camera ${cameraId} is ON AIR -> startProgramTone()`);
-      startProgramTone();
-    } else if (activePreviewCamera === cameraId) {
-      // Camera is in STANDBY / PREVIEW: play single preview tone
-      console.log(`[IntercomContext] Camera ${cameraId} is on PREVIEW -> playPreviewTone()`);
-      playPreviewTone();
-    } else {
-      // Camera is IDLE / OFF-AIR: stop all tones
-      stopAllTones();
+    // 2. 2-Second Cut Overlap: If this camera was ON AIR and just got cut
+    if (prevProgramCam === myCamId && activeProgramCamera !== myCamId) {
+      console.log(`[IntercomContext] Camera ${myCamId} cut from Program -> initiating 2000ms overlap tone`);
+      setIsProgramOverlap(true);
+
+      if (overlapTimerRef.current) {
+        clearTimeout(overlapTimerRef.current);
+      }
+
+      overlapTimerRef.current = setTimeout(() => {
+        overlapTimerRef.current = null;
+        setIsProgramOverlap(false);
+        console.log(`[IntercomContext] Camera ${myCamId} 2000ms overlap ended`);
+
+        // After 2000ms overlap, transition to preview or idle
+        const currentPgm = activeProgramCameraRef.current;
+        const currentPvw = activePreviewCameraRef.current;
+        if (currentPgm === myCamId) {
+          startProgramTone();
+        } else if (currentPvw === myCamId) {
+          playPreviewTone();
+        } else {
+          stopAllTones();
+        }
+      }, 2000);
+      return;
     }
+
+    // 3. Camera is ON AIR / PROGRAM
+    if (activeProgramCamera === myCamId) {
+      if (overlapTimerRef.current) {
+        clearTimeout(overlapTimerRef.current);
+        overlapTimerRef.current = null;
+      }
+      setIsProgramOverlap(false);
+      console.log(`[IntercomContext] Camera ${myCamId} is ON AIR -> startProgramTone()`);
+      startProgramTone();
+      return;
+    }
+
+    // 4. If currently in 2-second overlap, keep sounding program tone until timer completes
+    if (overlapTimerRef.current) {
+      return;
+    }
+
+    // 5. Camera is in STANDBY / PREVIEW
+    if (activePreviewCamera === myCamId) {
+      console.log(`[IntercomContext] Camera ${myCamId} is on PREVIEW -> playPreviewTone()`);
+      playPreviewTone();
+      return;
+    }
+
+    // 6. Camera is IDLE / OFF-AIR
+    stopAllTones();
   }, [currentUser, activeProgramCamera, activePreviewCamera]);
 
   // Clean up any playing tones and connections when provider unmounts
   useEffect(() => {
     return () => {
+      if (overlapTimerRef.current) {
+        clearTimeout(overlapTimerRef.current);
+        overlapTimerRef.current = null;
+      }
       stopAllTones();
       signalingService.disconnect();
       webrtcAudioService.endAudioCall();
@@ -342,6 +400,13 @@ export const IntercomProvider: React.FC<IntercomProviderProps> = ({ children }) 
     await webrtcAudioService.endAudioCall();
     await stopAllTones();
 
+    if (overlapTimerRef.current) {
+      clearTimeout(overlapTimerRef.current);
+      overlapTimerRef.current = null;
+    }
+    setIsProgramOverlap(false);
+    previousProgramCameraRef.current = null;
+
     setCurrentUser(null);
     setCurrentRoomId(null);
     setActivePreviewCamera(null);
@@ -482,6 +547,7 @@ export const IntercomProvider: React.FC<IntercomProviderProps> = ({ children }) 
       activeProgramCamera,
       participantsList,
       currentTallyState,
+      isProgramOverlap,
       connectionStatus,
       isMuted: currentUser?.isMuted ?? false,
       isMutedByDirector,
@@ -505,6 +571,7 @@ export const IntercomProvider: React.FC<IntercomProviderProps> = ({ children }) 
       activeProgramCamera,
       participantsList,
       currentTallyState,
+      isProgramOverlap,
       connectionStatus,
       isMutedByDirector,
       joinRoom,

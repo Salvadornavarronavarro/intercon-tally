@@ -177,6 +177,17 @@ export const DirectorView: React.FC = () => {
         </View>
 
         <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={[styles.headerMicBtn, isMuted ? styles.headerMicMuted : styles.headerMicActive]}
+            onPress={toggleMute}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.headerMicIcon}>{isMuted ? '🔇' : '🎙️'}</Text>
+            <Text style={[styles.headerMicText, isMuted ? styles.headerMicTextMuted : styles.headerMicTextActive]}>
+              {isMuted ? 'MUTED' : 'MIC ON'}
+            </Text>
+          </TouchableOpacity>
+
           <View style={[styles.statusPill, { borderColor: badge.color }]}>
             <View style={[styles.statusDot, { backgroundColor: badge.dot }]} />
             <Text style={[styles.statusText, { color: badge.color }]}>{badge.label}</Text>
@@ -610,6 +621,36 @@ const styles = StyleSheet.create({
     color: '#FF5252',
     fontWeight: '700',
     fontSize: 12,
+  },
+  headerMicBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  headerMicActive: {
+    backgroundColor: 'rgba(0, 230, 118, 0.15)',
+    borderColor: '#00E676',
+  },
+  headerMicMuted: {
+    backgroundColor: 'rgba(255, 23, 68, 0.15)',
+    borderColor: '#FF1744',
+  },
+  headerMicIcon: {
+    fontSize: 12,
+  },
+  headerMicText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  headerMicTextActive: {
+    color: '#00E676',
+  },
+  headerMicTextMuted: {
+    color: '#FF1744',
   },
   scrollContent: {
     padding: 16,
