@@ -364,7 +364,7 @@ export const IntercomProvider: React.FC<IntercomProviderProps> = ({ children }) 
    * Initializes audio session for background playback, connects signaling, and starts mesh WebRTC voice call.
    */
   const joinRoom = useCallback(async (roomId: string, user: Participant, signalingUrl?: string) => {
-    await initAudioSession();
+    // 1. Enter room immediately: synchronously set room & user so screen transitions without delay
     setCurrentRoomId(roomId);
     setCurrentUser(user);
 
@@ -376,12 +376,28 @@ export const IntercomProvider: React.FC<IntercomProviderProps> = ({ children }) 
       return [...prevList, user];
     });
 
-    // 1. Connect to real-time pub/sub signaling server & BroadcastChannel
-    await signalingService.connect(roomId, user, signalingUrl);
+    // 2. Non-blocking audio session initialization
+    try {
+      initAudioSession().catch(() => {});
+    } catch {}
 
-    // 2. Start full-duplex WebRTC mesh audio call
-    await webrtcAudioService.startAudioCall(roomId, user.id);
-    webrtcAudioService.setMicEnabled(!user.isMuted);
+    // 3. Connect to real-time pub/sub signaling server & BroadcastChannel
+    try {
+      await signalingService.connect(roomId, user, signalingUrl);
+    } catch (sigErr) {
+      console.warn('[IntercomContext] Signaling connection error during join:', sigErr);
+    }
+
+    // 4. Background WebRTC audio initialization (NEVER blocks screen transition or Tally UI)
+    (async () => {
+      try {
+        console.log('[IntercomContext] Starting background WebRTC audio initialization...');
+        await webrtcAudioService.startAudioCall(roomId, user.id);
+        webrtcAudioService.setMicEnabled(!user.isMuted);
+      } catch (audioErr) {
+        console.warn('[IntercomContext] WebRTC background start warning:', audioErr);
+      }
+    })();
   }, []);
 
   /**

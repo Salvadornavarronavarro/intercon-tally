@@ -55,26 +55,33 @@ export const normalizeSpanishTranscript = normalizeTranscript;
 /**
  * Parses spoken Spanish and English text for Director Tally commands:
  *
- * 1. Standby / Preview triggers:
- *    - "preparada cámara [N]", "prepara cámara [N]", "previo [N]", "preview [N]", "standby [N]", "ready [N]"
- *    - Action: Set Preview camera
+ * 1. PREVIEW COMMANDS (Strict verb match):
+ *    - Explicit action verbs: "preparado", "prepara", "preparada", "previo", "preview", "standby", "ready"
+ *    - Matches: ("preparado" | "prepara" | "preparada" | "previo" | "preview" | "standby" | "ready") + ("cámara" | "cam" | "camera")? + [1-8]
+ *    - Or suffix: ("cámara" | "cam" | "camera") + [1-8] + ("preparado" | "prepara" | "preparada" | "previo" | "preview")
+ *    - Action: Set Preview camera (Green)
  *
- * 2. Program / Live / Cut triggers:
- *    - "dentro cámara [N]", "cámara [N] dentro", "va [N]", "corte [N]", "cut [N]", "take [N]", "live [N]"
- *    - Direct cut commands: "cámara [N]", "cam [N]", "camera [N]"
- *    - Action: Switch to Program (Cut)
+ * 2. PROGRAM COMMANDS (Strict verb match):
+ *    - Explicit action verbs: "dentro", "aire", "al aire", "vamos con", "pincha", "va", "corte", "cut", "take", "live"
+ *    - Matches: ("dentro" | "aire" | "al aire" | "vamos con" | "pincha" | "va" | "corte" | "cut" | "take" | "live") + ("cámara" | "cam" | "camera")? + [1-8]
+ *    - Or suffix: ("cámara" | "cam" | "camera") + [1-8] + ("dentro" | "aire" | "al aire" | "pincha" | "va" | "corte" | "cut" | "take" | "live")
+ *    - Action: Switch to Program (Cut) with 2-second overlap (Red)
+ *
+ * 3. STANDALONE "cámara X" WITHOUT VERB:
+ *    - Explicitly returns null to prevent accidental cuts!
  */
 export function parseVoiceCommand(rawText: string): ParsedVoiceCommand | null {
   if (!rawText || typeof rawText !== 'string') return null;
 
   const normalized = normalizeTranscript(rawText.trim());
 
-  // 1. Preview Triggers: checked first so "preparada cámara 2" won't match direct "cámara 2"
+  // 1. PREVIEW TRIGGERS (Strict regex matching)
+  // Prefix: e.g. "preparado cámara 1", "prepara cam dos", "previo 3", "preview cam 4"
   const previewMatch1 = normalized.match(
-    /(preparad[oa]|prepara|previo|preview|standby|ready)\s*(c[áa]mara|camera|cam)?\s*([1-8])/i
+    /\b(preparad[oa]|prepara|previo|preview|standby|ready)\s*(?:a\s+)?(?:la\s+)?(?:c[áa]mara|camera|cam)?\s*([1-8])\b/i
   );
-  if (previewMatch1 && previewMatch1[3]) {
-    const num = parseInt(previewMatch1[3], 10);
+  if (previewMatch1 && previewMatch1[2]) {
+    const num = parseInt(previewMatch1[2], 10);
     if (num >= 1 && num <= 8) {
       return {
         type: 'PREVIEW',
@@ -86,29 +93,30 @@ export function parseVoiceCommand(rawText: string): ParsedVoiceCommand | null {
     }
   }
 
+  // Suffix: e.g. "cámara 2 preparada", "cam 3 previo", "camera 4 preview"
   const previewMatch2 = normalized.match(
-    /(c[áa]mara|camera|cam)\s*([1-8])\s*(preparad[oa]|prepara|previo|preview|standby|ready)/i
+    /\b(?:c[áa]mara|camera|cam)\s*([1-8])\s*(?:en\s+)?(preparad[oa]|prepara|previo|preview|standby|ready)\b/i
   );
-  if (previewMatch2 && previewMatch2[2]) {
-    const num = parseInt(previewMatch2[2], 10);
+  if (previewMatch2 && previewMatch2[1]) {
+    const num = parseInt(previewMatch2[1], 10);
     if (num >= 1 && num <= 8) {
       return {
         type: 'PREVIEW',
         cameraId: `cam${num}`,
         cameraNumber: num,
-        triggerWord: previewMatch2[3].toLowerCase(),
+        triggerWord: previewMatch2[2].toLowerCase(),
         rawPhrase: previewMatch2[0].trim(),
       };
     }
   }
 
-  // 2. Program Triggers (Explicit trigger word)
-  // Prefix: "dentro cámara 2", "va 3", "corte 1", "cut 4", "take 2", "live 1"
+  // 2. PROGRAM TRIGGERS (Strict regex matching: dentro, aire, vamos con, pincha, va, corte...)
+  // Prefix: e.g. "dentro cámara 1", "aire cámara 2", "vamos con cámara 3", "pincha cámara 4", "corte 5"
   const programMatch1 = normalized.match(
-    /(dentro|va|corte|cut|take|live|program)\s*(c[áa]mara|camera|cam)?\s*([1-8])/i
+    /\b(dentro|aire|al\s+aire|vamos\s+con|pincha|va|corte|cut|take|live)\s*(?:de\s+)?(?:la\s+)?(?:c[áa]mara|camera|cam)?\s*([1-8])\b/i
   );
-  if (programMatch1 && programMatch1[3]) {
-    const num = parseInt(programMatch1[3], 10);
+  if (programMatch1 && programMatch1[2]) {
+    const num = parseInt(programMatch1[2], 10);
     if (num >= 1 && num <= 8) {
       return {
         type: 'PROGRAM',
@@ -120,38 +128,24 @@ export function parseVoiceCommand(rawText: string): ParsedVoiceCommand | null {
     }
   }
 
-  // Suffix: "cámara 2 dentro", "cam 1 va", "camera 3 live", "cam 4 cut"
+  // Suffix: e.g. "cámara 1 dentro", "cámara 2 al aire", "cámara 3 aire", "cam 4 pincha", "cam 5 va"
   const programMatch2 = normalized.match(
-    /(c[áa]mara|camera|cam)\s*([1-8])\s*(dentro|va|corte|cut|take|live|program|on air)/i
+    /\b(?:c[áa]mara|camera|cam)\s*([1-8])\s*(?:a\s+)?(dentro|aire|al\s+aire|pincha|va|corte|cut|take|live)\b/i
   );
-  if (programMatch2 && programMatch2[2]) {
-    const num = parseInt(programMatch2[2], 10);
+  if (programMatch2 && programMatch2[1]) {
+    const num = parseInt(programMatch2[1], 10);
     if (num >= 1 && num <= 8) {
       return {
         type: 'PROGRAM',
         cameraId: `cam${num}`,
         cameraNumber: num,
-        triggerWord: programMatch2[3].toLowerCase(),
+        triggerWord: programMatch2[2].toLowerCase(),
         rawPhrase: programMatch2[0].trim(),
       };
     }
   }
 
-  // 3. Direct Program Trigger: "cámara [N]", "cam [N]", "camera [N]" (e.g. "cámara 1", "cam 2")
-  const directMatch = normalized.match(/\b(c[áa]mara|camera|cam)\s*([1-8])\b/i);
-  if (directMatch && directMatch[2]) {
-    const num = parseInt(directMatch[2], 10);
-    if (num >= 1 && num <= 8) {
-      return {
-        type: 'PROGRAM',
-        cameraId: `cam${num}`,
-        cameraNumber: num,
-        triggerWord: directMatch[1].toLowerCase(),
-        rawPhrase: directMatch[0].trim(),
-      };
-    }
-  }
-
+  // Standalone "cámara X" without an explicit action verb: MUST NOT trigger cut or preview
   return null;
 }
 

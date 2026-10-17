@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   SafeAreaView,
   View,
@@ -42,7 +42,7 @@ const MainScreen: React.FC = () => {
   const [selectedCam, setSelectedCam] = useState<CameraId>('cam1');
   const [name, setName] = useState<string>('Director 1');
   const [roomId, setRoomId] = useState<string>('STUDIO-A');
-  const [isJoining, setIsJoining] = useState<boolean>(false);
+  const hasEnteredRef = useRef<boolean>(false);
 
   const handleRoleChange = (newRole: UserRole) => {
     setRole(newRole);
@@ -60,33 +60,32 @@ const MainScreen: React.FC = () => {
     }
   };
 
-  const handleJoin = async () => {
+  const handleJoin = () => {
     if (!name.trim() || !roomId.trim()) return;
+    if (hasEnteredRef.current) return;
+    hasEnteredRef.current = true;
 
-    // iPadOS / iOS & macOS WebKit Audio Unlocking directly on user touch/click
+    // iPadOS / iOS & macOS WebKit Audio Unlocking (non-blocking)
     try {
-      await unlockAudioSession();
-      await webrtcAudioService.unlockAudioPlayback();
+      unlockAudioSession().catch(() => {});
+      webrtcAudioService.unlockAudioPlayback().catch(() => {});
     } catch (unlockErr) {
       console.warn('[App] Audio unlock warning:', unlockErr);
     }
 
-    setIsJoining(true);
-    try {
-      const userProfile: Participant = {
-        id: `user-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        name: name.trim(),
-        role,
-        cameraId: role === 'camera' ? selectedCam : undefined,
-        isMuted: false, // Default to UNMUTED (active talkback) upon entering room
-      };
+    const userProfile: Participant = {
+      id: `user-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      name: name.trim(),
+      role,
+      cameraId: role === 'camera' ? selectedCam : undefined,
+      isMuted: false, // Default to UNMUTED (active talkback) upon entering room
+    };
 
-      await joinRoom(roomId.trim().toUpperCase(), userProfile);
-    } catch (err) {
+    // Transition immediately without blocking
+    joinRoom(roomId.trim().toUpperCase(), userProfile).catch((err) => {
       console.warn('Failed to join intercom room:', err);
-    } finally {
-      setIsJoining(false);
-    }
+      hasEnteredRef.current = false;
+    });
   };
 
   // If user is already in a room, render the appropriate role view
@@ -222,13 +221,18 @@ const MainScreen: React.FC = () => {
 
           {/* Connect Action Button */}
           <TouchableOpacity
-            style={[styles.connectButton, isJoining && styles.buttonDisabled]}
+            style={styles.connectButton}
             onPress={handleJoin}
-            disabled={isJoining}
-            activeOpacity={0.85}
+            activeOpacity={0.8}
+            {...(Platform.OS === 'web'
+              ? ({
+                  onClick: handleJoin,
+                  onTouchEnd: handleJoin,
+                } as any)
+              : {})}
           >
             <Text style={styles.connectButtonText}>
-              {isJoining ? 'CONNECTING...' : 'ENTER PRODUCTION INTERCOM'}
+              ENTER PRODUCTION INTERCOM
             </Text>
           </TouchableOpacity>
 

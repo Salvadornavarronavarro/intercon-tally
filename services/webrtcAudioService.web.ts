@@ -61,12 +61,20 @@ export class WebRTCAudioService {
 
     try {
       if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia(MOBILE_AUDIO_CONSTRAINTS);
-        this.localStream = stream;
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia(MOBILE_AUDIO_CONSTRAINTS);
+          this.localStream = stream;
 
-        this.localStream.getAudioTracks().forEach((track) => {
-          track.enabled = this.isMicEnabled;
-        });
+          this.localStream.getAudioTracks().forEach((track) => {
+            track.enabled = this.isMicEnabled;
+          });
+        } catch (micErr) {
+          console.warn(
+            '[WebRTCAudioService-Web] Microphone access denied or delayed. Running in receive mode:',
+            micErr
+          );
+          this.localStream = null;
+        }
       } else {
         console.warn('[WebRTCAudioService-Web] MediaDevices not available in this environment');
       }
